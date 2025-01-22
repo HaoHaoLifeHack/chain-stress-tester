@@ -1,0 +1,55 @@
+# Node modules
+node_modules
+
+# Environment variables
+.env
+
+# Sensitive data
+src/data/accounts.json
+
+# Hardhat files
+/cache
+/artifacts
+
+
+# Solidity coverage files
+/coverage
+/coverage.json
+
+# Deployment files
+/deployments
+
+# Log files
+*.log
+*.log.*
+/logs/*
+!/logs/.gitkeep
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# IDE and editor specific files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Build directories
+/dist
+/build
+
+# Miscellaneous
+*.bak
+*.backup
+
