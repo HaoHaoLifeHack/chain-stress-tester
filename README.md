@@ -41,9 +41,9 @@ node src/scripts/initAccounts.js
 ```
 This will create 100 test accounts and save them to `./data/accounts.json`.
 
-2. **Fund the master wallet:**
+2. **Fund Main Account:**
 ```Shell
-node src/scripts/fundMasterAccount.js
+node src/scripts/fundMainAccount.js
 ```
 
 3. **Fund test accounts:**

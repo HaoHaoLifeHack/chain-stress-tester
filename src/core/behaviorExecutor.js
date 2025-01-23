@@ -1,28 +1,34 @@
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger.js';
+import { getFeeData } from '../utils/feeUtils.js';
 
-const nonceMap = new Map();
+const accountLocks = new Map();
 
-async function getNonceForAccount(account) {
-    if (!nonceMap.has(account.address)) {
-        nonceMap.set(account.address, await account.getNonce());
+async function acquireAccountLock(address) {
+    while (accountLocks.get(address)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
-    const currentNonce = nonceMap.get(account.address);
-    nonceMap.set(account.address, currentNonce + 1);
-    return currentNonce;
+    accountLocks.set(address, true);
 }
 
-async function transferNativeToken(sender, receiver, amount) {
-    let nonce;  
+async function releaseAccountLock(address) {
+    accountLocks.delete(address);
+}
+
+async function getNonceForAccount(account, provider) {
+    return await provider.getTransactionCount(account.address, 'pending');
+}
+
+async function transferNativeToken(sender, receiver, amount, nonce) {
     try {
-        nonce = await getNonceForAccount(sender);
+        const feeData = await getFeeData();
         const tx = {
             to: receiver.address,
             value: ethers.parseEther(amount.toString()),
             nonce: nonce,
             gasLimit: 21000,
-            maxFeePerGas: ethers.parseUnits('2', 'gwei'),
-            maxPriorityFeePerGas: ethers.parseUnits('1', 'gwei')
+            maxFeePerGas: feeData.maxFeePerGas,
+            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
         };
         return await sender.sendTransaction(tx);
     } catch (error) {
@@ -32,7 +38,7 @@ async function transferNativeToken(sender, receiver, amount) {
             transaction: {
                 from: sender?.address,
                 to: receiver?.address,
-                nonce: nonce || 'undefined',
+                nonce: nonce,
                 amount: amount
             }
         });
@@ -40,23 +46,20 @@ async function transferNativeToken(sender, receiver, amount) {
     }
 }
 
-async function transferERC20Token(sender, receiver, tokenContract, amount) {
-    let nonce;  
+async function transferERC20Token(sender, receiver, tokenContract, amount, nonce) {
     try {
-        nonce = await getNonceForAccount(sender);
         const balance = await tokenContract.balanceOf(sender.address);
         if(balance < amount) {
             const faucetTx = await tokenContract.connect(sender).faucet(sender.address, {
                 nonce: nonce
             });
             await faucetTx.wait(1);
-            nonce = await getNonceForAccount(sender); 
         }
         
-        const tx = await tokenContract.connect(sender).transfer(receiver.address, amount, {
+        return await tokenContract.connect(sender).transfer(receiver.address, amount, {
             nonce: nonce
         });
-        return tx;
+
     } catch (error) {
         logger.error('ERC20 token transfer failed', {
             error: error.message,
@@ -64,7 +67,7 @@ async function transferERC20Token(sender, receiver, tokenContract, amount) {
             transaction: {
                 from: sender?.address,
                 to: receiver?.address,
-                nonce: nonce || 'undefined',
+                nonce: nonce,
                 amount: amount.toString()
             }
         });
@@ -72,10 +75,36 @@ async function transferERC20Token(sender, receiver, tokenContract, amount) {
     }
 }
 
-async function deployContract(sender, abi, bytecode) {
-    let nonce;  
+async function sendHugeCalldata(sender, receiver, nonce) {
     try {
-        nonce = await getNonceForAccount(sender);
+        // Generate random calldata in 100KB to 127KB (Limit: 128KB)
+        const size = Math.floor(Math.random() * (127 - 100 + 1) + 100) * 1024;
+        const hugeData = '0x' + '00'.repeat(size);
+        const feeData = await getFeeData();
+        const tx = await sender.sendTransaction({
+            to: receiver.address,
+            data: hugeData,
+            nonce: nonce,
+            maxFeePerGas: feeData.maxFeePerGas,
+            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
+        });
+        return tx;
+    } catch (error) {
+        logger.error('Huge calldata transaction failed', {
+            error: error.message,
+            code: error.code,
+            transaction: {
+                from: sender?.address,
+                to: receiver?.address,
+                nonce: nonce,
+            }
+        });
+        throw error;
+    }
+}
+
+async function deployContract(sender, abi, bytecode, nonce) {
+    try {
         const factory = new ethers.ContractFactory(abi, bytecode, sender);
         const contract = await factory.deploy({
             nonce: nonce
@@ -87,55 +116,86 @@ async function deployContract(sender, abi, bytecode) {
             code: error.code,
             transaction: {
                 from: sender?.address,
-                nonce: nonce || 'undefined'
+                nonce: nonce
             }
         });
         throw error;
     }
 }
 
-async function executeRandomTransaction(accounts, tokenContract, config, simpleStorageJson) {
+async function ensureSufficientBalance(sender, provider, mainAccount, threshold = ethers.parseEther('0.01')) {
+    const balance = await provider.getBalance(sender.address);
+    if (balance < threshold) {
+        try {
+            await acquireAccountLock(mainAccount.address);
+            const feeData = await getFeeData();
+            const tx = {
+                to: sender.address,
+                value: threshold - balance,
+                gasLimit: 21000,
+                maxFeePerGas: feeData.maxFeePerGas,
+                maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
+                };
+
+                const txResponse = await mainAccount.sendTransaction(tx);
+                await txResponse.wait();
+
+                logger.info('Balance topped up', {
+                    address: sender.address,
+                    amount: threshold - balance,
+                    txHash: txResponse.hash
+            });
+        } finally {
+            releaseAccountLock(mainAccount.address);
+        }
+    }
+}
+
+async function executeRandomTransaction(sender, allAccounts, tokenContract, config, simpleStorageJson) {
     const {
         complexityLevel = 50,
         ethTransferAmount = '0.000000001',
         skipWait = false,
-        resetNonceMap = false
     } = config;
 
-    if (resetNonceMap) {
-        nonceMap.clear();
-    }
-
-    let sender, receiver, behavior;  
+    let receiver, behavior, nonce;  
     
     try {
-        if (!accounts || accounts.length === 0) {
+        // 1. Lock sender while the tx's sending
+        await acquireAccountLock(sender.address);
+
+        if (!sender || !allAccounts || allAccounts.length === 0) {
             throw new Error('No accounts available');
         }
 
-        const randomIndex = Math.floor(Math.random() * accounts.length);
-        sender = accounts[randomIndex];
+        await ensureSufficientBalance(sender, sender.provider, allAccounts[0]);
 
-        let receiverIndex;
+        // Select a receiver that is not the sender
         do {
-            receiverIndex = Math.floor(Math.random() * accounts.length);
-        } while (receiverIndex === randomIndex);
-        receiver = accounts[receiverIndex];
+            const randomIndex = Math.floor(Math.random() * allAccounts.length);
+            receiver = allAccounts[randomIndex];
+        } while (receiver.address === sender.address);
 
         behavior = selectBehavior(calculateWeights(complexityLevel));
+        nonce = await getNonceForAccount(sender, sender.provider);
         
         let result;
         switch (behavior) {
             case 0:
-                result = await transferNativeToken(sender, receiver, ethTransferAmount);
+                result = await transferNativeToken(sender, receiver, ethTransferAmount, nonce);
                 break;
             case 1:
                 const decimals = await tokenContract.decimals();
                 const amount = ethers.parseUnits("1", decimals);
-                result = await transferERC20Token(sender, receiver, tokenContract, amount);
+                result = await transferERC20Token(sender, receiver, tokenContract, amount, nonce);
                 break;
             case 2:
-                result = await deployContract(sender, simpleStorageJson.abi, simpleStorageJson.bytecode);
+                // Randomly choose between contract deployment and huge calldata
+                if (Math.random() < 0.5) {
+                    result = await deployContract(sender, simpleStorageJson.abi, simpleStorageJson.bytecode, nonce);
+                } else {
+                    result = await sendHugeCalldata(sender, receiver, nonce);
+                }
                 break;
             default:
                 throw new Error(`Invalid behavior: ${behavior}`);
@@ -151,11 +211,13 @@ async function executeRandomTransaction(accounts, tokenContract, config, simpleS
             error: error.message,
             code: error.code,
             transaction: {
-                from: sender.address,
-                to: receiver.address,
+                from: sender?.address,
+                to: receiver?.address,
             }
         });
         throw error;
+    } finally {
+        releaseAccountLock(sender.address);
     }
 }
 
@@ -183,21 +245,21 @@ function calculateWeights(complexityLevel) {
     }
     
     if (level === 100) {
-        // most complex: only deploy contract
+        // most complex: only complex transactions
         return [0, 0, 100];
     }
     
     // dynamic calculate weights
-    const simpleWeight = Math.max(0, 100 - level);  // ETH transfer weight
-    const complexWeight = level;  // contract deployment weight
-    const mediumWeight = Math.max(0, 50 - Math.abs(50 - level));  // ERC20 token transfer weight
+    const nativeTokenTransferWeight = Math.max(0, 100 - level);  // ETH transfer weight
+    const erc20TokenTransferWeight = Math.max(0, 50 - Math.abs(50 - level));  // ERC20 token transfer weight
+    const hugeCalldataWeight = level;  // complex transactions weight (contract deployment or huge calldata)
     
     // normalize weights to ensure total is 100
-    const total = simpleWeight + mediumWeight + complexWeight;
+    const total = nativeTokenTransferWeight + erc20TokenTransferWeight + hugeCalldataWeight;
     return [
-        Math.round((simpleWeight / total) * 100),
-        Math.round((mediumWeight / total) * 100),
-        Math.round((complexWeight / total) * 100)
+        Math.round((nativeTokenTransferWeight / total) * 100),
+        Math.round((erc20TokenTransferWeight / total) * 100),
+        Math.round((hugeCalldataWeight / total) * 100)
     ];
 }
 
@@ -206,5 +268,8 @@ export {
     transferNativeToken,
     transferERC20Token,
     deployContract,
-    calculateWeights
+    calculateWeights,
+    ensureSufficientBalance,
+    acquireAccountLock,
+    releaseAccountLock
 }; 

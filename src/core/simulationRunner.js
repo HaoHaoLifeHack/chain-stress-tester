@@ -27,10 +27,9 @@ async function runSimulation() {
     );
 
     const BATCH_SIZE = CONFIG.SIMULATION.BATCH_SIZE;
-    const BATCH_INTERVAL = CONFIG.SIMULATION.BATCH_INTERVAL; 
+    const BATCH_INTERVAL = CONFIG.SIMULATION.BATCH_INTERVAL;
+    const duration = CONFIG.SIMULATION.DURATION || 3600000;
     
-    
-    const duration = CONFIG.SIMULATION.DURATION || 3600000; // default 1 hour
     console.log(`\n=== Starting Simulation ===`);
     console.log(`Batch Size: ${BATCH_SIZE}`);
     console.log(`Interval: ${BATCH_INTERVAL}ms\n`);
@@ -39,79 +38,90 @@ async function runSimulation() {
     let successTx = 0;
     let failedTx = 0;
     const startTime = Date.now();
-
-    const LOG_INTERVAL = CONFIG.SIMULATION.LOG_INTERVAL;
     let lastLogTime = Date.now();
 
-    const intervalId = setInterval(async () => {
-        const batchPromises = [];
+    function getRandomSenders(accounts, batchSize) {
+        const selected = new Set();
+        const result = [];
         
-        for (let i = 0; i < BATCH_SIZE; i++) {
-            batchPromises.push(
-                executeRandomTransaction(
+        while (result.length < batchSize && result.length < accounts.length) {
+            const randomIndex = Math.floor(Math.random() * accounts.length);
+            if (!selected.has(randomIndex)) {
+                selected.add(randomIndex);
+                result.push(accounts[randomIndex]);
+            }
+        }
+        
+        return result;
+    }
+
+    async function executeBatch() {
+        const uniqueSenders = getRandomSenders(accounts, BATCH_SIZE);
+        const batchPromises = uniqueSenders.map(async (sender) => {
+            try {
+                const result = await executeRandomTransaction(
+                    sender,
                     accounts,
                     tokenContract,
                     {
                         complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
                         ethTransferAmount: CONFIG.SIMULATION.ETH_TRANSFER_AMOUNT,
-                        skipWait: CONFIG.SIMULATION.WAIT_CONFIRMATION,
-                        resetNonceMap: i === 0  // Reset nonce map only for first batch
+                        skipWait: CONFIG.SIMULATION.WAIT_CONFIRMATION
                     },
                     simpleStorageJson
-                ).then(() => {
-                    successTx++;
-                    return true;
-                }).catch(error => {
-                    failedTx++;
-                    logger.error('Execute Random Behavior failed', {error: error.message});
-                    return false;
-                })
-            );
-        }
-
-        try {
-            await Promise.allSettled(batchPromises);
-            totalTx += BATCH_SIZE;
-            
-            // Start to log every LOG_INTERVAL seconds
-            const currentTime = Date.now();
-            if (currentTime - lastLogTime >= LOG_INTERVAL) {
-                const elapsedSeconds = (currentTime - startTime) / 1000;
+                );
                 
-                console.log(`\n=== Simulation Stats ===`);
-                console.log(`Total Transactions: ${totalTx}`);
-                console.log(`Successful: ${successTx}`);
-                console.log(`Failed: ${failedTx}`);
-                console.log(`Elapsed Time: ${elapsedSeconds.toFixed(0)}s\n`);
-                
-                lastLogTime = currentTime;
+                successTx++;
+                return result;
+            } catch (error) {
+                failedTx++;
+                logger.error('Execute Random Behavior failed', {error: error.message});
+                return false;
             }
-        } catch (error) {
-            logger.error('Batch execution failed', {error: error.message});
-        }
-    }, BATCH_INTERVAL);
+        });
 
-    // Execute after duration
-    const timeoutId = setTimeout(() => {
-        // Clear both intervals
-        clearInterval(intervalId);
-        clearTimeout(timeoutId);
+        await Promise.all(batchPromises);
+        totalTx += BATCH_SIZE;
+
+        const currentTime = Date.now();
+        if (currentTime - lastLogTime >= CONFIG.SIMULATION.LOG_INTERVAL) {
+            const elapsedSeconds = (currentTime - startTime) / 1000;
+            console.log(`\n=== Simulation Stats ===`);
+            console.log(`Total Transactions: ${totalTx}`);
+            console.log(`Successful: ${successTx}`);
+            console.log(`Failed: ${failedTx}`);
+            // console.log(`Elapsed Time: ${elapsedSeconds.toFixed(0)}s\n`);
+            lastLogTime = currentTime;
+        }
+    }
+
+    async function runBatches() {
+        if (Date.now() - startTime >= duration) {
+            return completeSimulation();
+        }
+
+        // run current batch 
+        await executeBatch();
         
+        // wait for the interval (e.g. 1 second)
+        await new Promise(resolve => setTimeout(resolve, BATCH_INTERVAL));
+        
+        // run next batch
+        return runBatches();
+    }
+
+    function completeSimulation() {
         const endTime = Date.now();
         const totalTime = (endTime - startTime) / 1000;
-        const finalTPS = (successTx / totalTime).toFixed(2);
+        //const finalTPS = (successTx / totalTime).toFixed(2);
         
-        // Log simulation results only
         const simulationResults = {
             timestamp: new Date().toISOString(),
             parameters: {
-                // Batch settings
                 batchSize: CONFIG.SIMULATION.BATCH_SIZE,
                 batchInterval: CONFIG.SIMULATION.BATCH_INTERVAL,
                 duration: CONFIG.SIMULATION.DURATION,
                 logInterval: CONFIG.SIMULATION.LOG_INTERVAL,
-                
-                // Transaction settings
                 complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
                 ethTransferAmount: CONFIG.SIMULATION.ETH_TRANSFER_AMOUNT,
                 waitConfirmation: CONFIG.SIMULATION.WAIT_CONFIRMATION,
@@ -120,24 +130,23 @@ async function runSimulation() {
                 totalTransactions: totalTx,
                 successfulTransactions: successTx,
                 failedTransactions: failedTx,
-                averageTPS: finalTPS,
+                // averageTPS: finalTPS,
                 totalTimeSeconds: totalTime.toFixed(0)
             }
         };
 
-        // Console output
         console.log(`\n=== Simulation Completed ===`);
         console.log(`Total Transactions: ${totalTx}`);
         console.log(`Successful: ${successTx}`);
         console.log(`Failed: ${failedTx}`);
-        console.log(`Average TPS: ${finalTPS}`);
-        console.log(`Total Time: ${totalTime.toFixed(0)}s\n`);
+        // console.log(`Average TPS: ${finalTPS}`);
+        // console.log(`Total Time: ${totalTime.toFixed(0)}s\n`);
 
-        // Log only simulation results to simulation.log
         simulationLogger.info('Simulation completed', simulationResults);
-
         process.exit(0);
-    }, duration);
+    }
+
+    await runBatches();
 }
 
 export { runSimulation };

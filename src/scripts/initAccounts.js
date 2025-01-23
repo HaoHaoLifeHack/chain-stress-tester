@@ -29,12 +29,13 @@ async function createAccounts() {
         });
 
         try {
+            const feeData = await getFeeData();
             const tx = {
                 to: childWallet.address,
                 value: ethers.parseEther(CONFIG.CREATE_ACCOUNT.INITIAL_FUND),
                 nonce: nonce++,
-                maxFeePerGas: ethers.parseUnits(2, 'gwei'),
-                maxPriorityFeePerGas: ethers.parseUnits(1, 'gwei')
+                maxFeePerGas: feeData.maxFeePerGas,
+                maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
             };
 
             const txResponse = await masterWallet.sendTransaction(tx);
