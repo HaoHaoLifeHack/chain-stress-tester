@@ -7,12 +7,6 @@ import 'dotenv/config';
 export async function loadAccounts() {
     const accountCount = CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT;
 
-    // Check if accountCount exceeds 100
-    if (accountCount > 100) {
-        logger.error('Account count exceeds the maximum limit of 100.');
-        throw new Error('Account count exceeds the maximum limit of 100.');
-    }
-
     try {
         const mnemonic = process.env.SEED_PHRASE; // Ensure this is set in your environment variables
         if (!mnemonic) {

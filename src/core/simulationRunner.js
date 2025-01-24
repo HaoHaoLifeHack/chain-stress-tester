@@ -44,8 +44,8 @@ async function runSimulation() {
     async function runBatches() {
         while (!stopSimulation) {
             await executeBatch();
+            await new Promise(resolve => setTimeout(resolve, CONFIG.SIMULATION.BATCH_INTERVAL));
         }
-        await new Promise(resolve => setTimeout(resolve, CONFIG.SIMULATION.BATCH_INTERVAL));
         return completeSimulation();
     }
 
