@@ -18,6 +18,16 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function createAccounts() {
     const accounts = [];
     const hdNode = ethers.HDNodeWallet.fromPhrase(process.env.SEED_PHRASE);
+
+    // Fund master wallet
+    const tx = await personalWallet.sendTransaction({
+        to: masterWallet.address,
+        value: ethers.parseEther("0.1"),
+    });
+
+    await tx.wait();
+    console.log(`✅ Master wallet init funded`);
+
     let nonce = await provider.getTransactionCount(masterWallet.address);
 
     for (let i = 0; i < CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT; i++) {
@@ -60,14 +70,14 @@ async function createAccounts() {
     }
 
     await fs.writeFileSync(
-        path.join(__dirname, '../data/accounts.json'), 
+        path.join(__dirname, '../data/accounts.json'),
         JSON.stringify(accounts, null, 2)
     );
 
     return accounts;
 }
 
-export { createAccounts, masterWallet }; 
+export { createAccounts, masterWallet };
 
 if (import.meta.url === `file://${process.argv[1]}`) {
     createAccounts().then(accounts => {
