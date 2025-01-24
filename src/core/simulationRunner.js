@@ -30,7 +30,6 @@ async function runSimulation() {
 
     const BATCH_SIZE = CONFIG.SIMULATION.BATCH_SIZE;
     const BATCH_INTERVAL = CONFIG.SIMULATION.BATCH_INTERVAL;
-    //const duration = CONFIG.SIMULATION.DURATION || 3600000;
     
     console.log(`\n=== Starting Simulation ===`);
     console.log(`Batch Size: ${BATCH_SIZE}`);
@@ -43,41 +42,31 @@ async function runSimulation() {
     let lastLogTime = Date.now();
 
     async function runBatches() {
-        if (stopSimulation) {
-            return completeSimulation();
+        while (!stopSimulation) {
+            await executeBatch();
         }
-
-        // run current batch 
-        await executeBatch();
-        
-        // wait for the interval
         await new Promise(resolve => setTimeout(resolve, CONFIG.SIMULATION.BATCH_INTERVAL));
-        
-        // run next batch
-        return runBatches();
+        return completeSimulation();
     }
 
     function completeSimulation() {
         const endTime = Date.now();
         const totalTime = (endTime - startTime) / 1000;
-        //const finalTPS = (successTx / totalTime).toFixed(2);
         
         const simulationResults = {
             timestamp: new Date().toISOString(),
             parameters: {
                 batchSize: CONFIG.SIMULATION.BATCH_SIZE,
                 batchInterval: CONFIG.SIMULATION.BATCH_INTERVAL,
-                //duration: CONFIG.SIMULATION.DURATION,
                 logInterval: CONFIG.SIMULATION.LOG_INTERVAL,
                 complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
                 ethTransferAmount: CONFIG.SIMULATION.ETH_TRANSFER_AMOUNT,
-                waitConfirmation: CONFIG.SIMULATION.WAIT_CONFIRMATION,
+                skipWait: CONFIG.SIMULATION.SKIP_WAIT_CONFIRMATION,
             },
             metrics: {
                 totalTransactions: totalTx,
                 successfulTransactions: successTx,
                 failedTransactions: failedTx,
-                // averageTPS: finalTPS,
                 totalTimeSeconds: totalTime.toFixed(0)
             }
         };
@@ -86,8 +75,6 @@ async function runSimulation() {
         console.log(`Total Transactions: ${totalTx}`);
         console.log(`Successful: ${successTx}`);
         console.log(`Failed: ${failedTx}`);
-        // console.log(`Average TPS: ${finalTPS}`);
-        // console.log(`Total Time: ${totalTime.toFixed(0)}s\n`);
 
         simulationLogger.info('Simulation completed', simulationResults);
         stopSimulation = false; // Reset stop flag
@@ -105,7 +92,7 @@ async function runSimulation() {
                     {
                         complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
                         ethTransferAmount: CONFIG.SIMULATION.ETH_TRANSFER_AMOUNT,
-                        skipWait: CONFIG.SIMULATION.WAIT_CONFIRMATION
+                        skipWait: CONFIG.SIMULATION.SKIP_WAIT_CONFIRMATION
                     },
                     simpleStorageJson
                 );
@@ -124,12 +111,10 @@ async function runSimulation() {
 
         const currentTime = Date.now();
         if (currentTime - lastLogTime >= CONFIG.SIMULATION.LOG_INTERVAL) {
-            const elapsedSeconds = (currentTime - startTime) / 1000;
             console.log(`\n=== Simulation Stats ===`);
             console.log(`Total Transactions: ${totalTx}`);
             console.log(`Successful: ${successTx}`);
             console.log(`Failed: ${failedTx}`);
-            console.log(`Elapsed Time: ${elapsedSeconds.toFixed(0)}s\n`);
             lastLogTime = currentTime;
         }
     }
@@ -153,7 +138,7 @@ async function runSimulation() {
 
 function stopCurrentSimulation() {
     stopSimulation = true;
-    logger.info('Simulation stopped', { timestamp: Date.now() });
+    logger.info('Simulation stopped', { timestamp: new Date().toISOString() });
 }
 
 export { runSimulation, stopCurrentSimulation };

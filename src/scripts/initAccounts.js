@@ -68,12 +68,7 @@ async function createAccounts() {
             await sleep(1000);
         }
     }
-
-    await fs.writeFileSync(
-        path.join(__dirname, '../data/accounts.json'),
-        JSON.stringify(accounts, null, 2)
-    );
-
+    
     return accounts;
 }
 

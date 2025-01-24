@@ -9,18 +9,19 @@ let simulationRunning = false;
 let simulationProcess = null;
 
 app.post('/simulation', (req, res) => {
-    const { action, batchSize, batchInterval, complexityLevel, accountCount } = req.body;
+    const { method, params = [] } = req.body;
+    const [batchSize, batchInterval, complexityLevel, accountCount] = params;
 
-    if (action === 'start') {
+    if (method === 'start') {
         if (simulationRunning) {
             return res.status(400).json({ message: 'Simulation is already running' });
         }
 
         // Update configuration based on request
-        if (batchSize) CONFIG.SIMULATION.BATCH_SIZE = batchSize;
-        if (batchInterval) CONFIG.SIMULATION.BATCH_INTERVAL = batchInterval;
-        if (complexityLevel) CONFIG.SIMULATION.DEFAULT_COMPLEXITY = complexityLevel;
-        if (accountCount) CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT = accountCount;
+        if (batchSize !== undefined) CONFIG.SIMULATION.BATCH_SIZE = batchSize;
+        if (batchInterval !== undefined) CONFIG.SIMULATION.BATCH_INTERVAL = batchInterval;
+        if (complexityLevel !== undefined) CONFIG.SIMULATION.DEFAULT_COMPLEXITY = complexityLevel;
+        if (accountCount !== undefined) CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT = accountCount;
 
         simulationRunning = true;
         simulationProcess = runSimulation()
@@ -35,7 +36,7 @@ app.post('/simulation', (req, res) => {
         return res.status(200).json({ message: 'Simulation started' });
     }
 
-    if (action === 'stop') {
+    if (method === 'stop') {
         if (!simulationRunning) {
             return res.status(400).json({ message: 'No simulation is running' });
         }
@@ -47,7 +48,7 @@ app.post('/simulation', (req, res) => {
         return res.status(200).json({ message: 'Simulation stopped' });
     }
 
-    return res.status(400).json({ message: 'Invalid action' });
+    return res.status(400).json({ message: 'Invalid method' });
 });
 
 const PORT = process.env.PORT || 3000;

@@ -39,7 +39,7 @@ npm install
 ```Shell
 node src/scripts/initAccounts.js
 ```
-This will create 100 test accounts and save them to `./data/accounts.json`.
+This will create 100 test accounts.
 
 2. **Fund Main Account:**
 ```Shell
@@ -66,16 +66,15 @@ CREATE_ACCOUNT: {
 ```javascript
 SIMULATION: {
     DEFAULT_COMPLEXITY: 50,     // 0-100: Higher values increase huge calldata probability
-    DURATION: 60000,          // Total simulation duration (ms)
     ETH_TRANSFER_AMOUNT: '0.000001', // Amount of ETH per transfer
     BATCH_SIZE: 10,           // Number of transactions per batch
     BATCH_INTERVAL: 100,      // Interval between batches (ms)
-    WAIT_CONFIRMATION: true,  // Whether to wait for transaction confirmation
+    SKIP_WAIT_CONFIRMATION: false,  // Whether to skip waiting for transaction confirmation
     LOG_INTERVAL: 2000        // Interval between logging stats (ms)
 }
 ```
 ## Run
-1. **Execute Tests:**
+1. **Execute Stress Testing:**
 
 ```Shell
 npm start
@@ -98,7 +97,6 @@ chain-stress-tester/
 ├── src/
 │   ├── config/         # Configuration files
 │   ├── core/           # Core functionality
-│   ├── data/           # Data files
 │   ├── scripts/        # Executable scripts
 │   └── utils/          # Utility functions
 ```
@@ -113,3 +111,31 @@ chain-stress-tester/
   - Coordinates test accounts and transaction patterns
   - Tracks performance metrics (TPS, success rates)
   - Generates real-time test reports
+
+## Run RPC Server
+1. **Start the server:**
+```Shell
+node src/server/rpcServer.js
+```
+
+2. **Start Simulation:**
+```Shell
+# Sample
+# params: [batchSize, batchInterval, complexityLevel, accountCount]
+curl -X POST http://localhost:3000/simulation \
+-H "Content-Type: application/json" \
+-d '{
+    "method": "start",
+    "params": [10, 1000, 10, 50],
+}'
+```
+
+3. **Stop Simulation:**
+```Shell
+# Sample
+curl -X POST http://localhost:3000/simulation \
+-H "Content-Type: application/json" \
+-d '{
+    "method": "stop",
+}'
+```

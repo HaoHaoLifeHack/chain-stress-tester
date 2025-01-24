@@ -17,6 +17,21 @@ logFiles.forEach(file => {
     }
 });
 
+// Mutually used console format
+const consoleFormat = winston.format.combine(
+    winston.format.colorize(),
+    winston.format.timestamp(),
+    winston.format.printf(({ level, message, timestamp, ...meta }) => {
+        return `${timestamp} ${level}: ${message} ${Object.keys(meta).length ? serializeBigInt(meta) : ''}`;
+    })
+);
+
+const serializeBigInt = (obj) => {
+    return JSON.stringify(obj, (_, value) =>
+        typeof value === 'bigint' ? value.toString() : value
+        , 2);
+};
+
 // Main logger for other operations
 export const logger = winston.createLogger({
     level: 'info',
@@ -31,6 +46,9 @@ export const logger = winston.createLogger({
         }),
         new winston.transports.File({ 
             filename: path.join(logsDir, 'combined.log')
+        }),
+        new winston.transports.Console({
+            format: consoleFormat
         })
     ]
 });
@@ -45,6 +63,9 @@ export const simulationLogger = winston.createLogger({
         new winston.transports.File({
             filename: path.join(logsDir, 'simulation.log'),
             options: { flags: 'a' }
+        }),
+        new winston.transports.Console({
+            format: consoleFormat
         })
     ]
 });

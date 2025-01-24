@@ -16,7 +16,7 @@ async function releaseAccountLock(address) {
 }
 
 async function getNonceForAccount(account, provider) {
-    return await provider.getTransactionCount(account.address, 'pending');
+    return await provider.getTransactionCount(account.address, 'latest');
 }
 
 async function transferNativeToken(sender, receiver, amount, nonce) {
@@ -24,7 +24,7 @@ async function transferNativeToken(sender, receiver, amount, nonce) {
         const feeData = await getFeeData();
         const tx = {
             to: receiver.address,
-            value: ethers.parseEther(amount.toString()),
+            value: ethers.parseEther(amount),
             nonce: nonce,
             gasLimit: 21000,
             maxFeePerGas: feeData.maxFeePerGas,
