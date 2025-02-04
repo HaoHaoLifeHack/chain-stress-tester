@@ -2,17 +2,12 @@ import 'dotenv/config';
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger.js';
 import { CONFIG } from '../config/simulation.config.js';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import fs from 'fs';
-import path from 'path';
+import { getFeeDataWithRetry } from '../utils/rpcUtils.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const provider = new ethers.JsonRpcProvider(process.env.DEVCHAIN_ENDPOINT_URL);
 const masterWallet = ethers.Wallet.fromPhrase(process.env.SEED_PHRASE, provider);
-
+const personalWallet = ethers.Wallet.fromPhrase(process.env.PERSONAL_SEED_PHRASE, provider);
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function createAccounts() {
@@ -39,7 +34,7 @@ async function createAccounts() {
         });
 
         try {
-            const feeData = await getFeeData();
+            const feeData = await getFeeDataWithRetry(provider);
             const tx = {
                 to: childWallet.address,
                 value: ethers.parseEther(CONFIG.CREATE_ACCOUNT.INITIAL_FUND),

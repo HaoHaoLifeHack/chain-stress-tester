@@ -21,7 +21,7 @@ async function fundMainAccount() {
         // Send transaction
         const tx = await personalWallet.sendTransaction({
             to: mainAccount.address,
-            value: ethers.parseEther('100') // Transfer 10 ETH
+            value: ethers.parseEther('10') // Transfer 10 ETH
         });
         
         console.log('Transaction sent, waiting for confirmation...');

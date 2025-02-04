@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger.js';
-import { getFeeData } from '../utils/feeUtils.js';
+import { getFeeDataWithRetry } from '../utils/rpcUtils.js';
+
 
 const accountLocks = new Map();
 
@@ -15,17 +16,12 @@ async function releaseAccountLock(address) {
     accountLocks.delete(address);
 }
 
-async function getNonceForAccount(account, provider) {
-    return await provider.getTransactionCount(account.address, 'latest');
-}
-
-async function transferNativeToken(sender, receiver, amount, nonce) {
+async function transferNativeToken(sender, receiver, amount) {
     try {
-        const feeData = await getFeeData();
+        const feeData = await getFeeDataWithRetry(sender.provider);
         const tx = {
             to: receiver.address,
             value: ethers.parseEther(amount),
-            nonce: nonce,
             gasLimit: 21000,
             maxFeePerGas: feeData.maxFeePerGas,
             maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
@@ -38,7 +34,6 @@ async function transferNativeToken(sender, receiver, amount, nonce) {
             transaction: {
                 from: sender?.address,
                 to: receiver?.address,
-                nonce: nonce,
                 amount: amount
             }
         });
@@ -46,19 +41,15 @@ async function transferNativeToken(sender, receiver, amount, nonce) {
     }
 }
 
-async function transferERC20Token(sender, receiver, tokenContract, amount, nonce) {
+async function transferERC20Token(sender, receiver, tokenContract, amount) {
     try {
         const balance = await tokenContract.balanceOf(sender.address);
         if(balance < amount) {
-            const faucetTx = await tokenContract.connect(sender).faucet(sender.address, {
-                nonce: nonce
-            });
+            const faucetTx = await tokenContract.connect(sender).faucet(sender.address);
             await faucetTx.wait(1);
         }
         
-        return await tokenContract.connect(sender).transfer(receiver.address, amount, {
-            nonce: nonce
-        });
+        return await tokenContract.connect(sender).transfer(receiver.address, amount);
 
     } catch (error) {
         logger.error('ERC20 token transfer failed', {
@@ -67,7 +58,6 @@ async function transferERC20Token(sender, receiver, tokenContract, amount, nonce
             transaction: {
                 from: sender?.address,
                 to: receiver?.address,
-                nonce: nonce,
                 amount: amount.toString()
             }
         });
@@ -75,16 +65,15 @@ async function transferERC20Token(sender, receiver, tokenContract, amount, nonce
     }
 }
 
-async function sendHugeCalldata(sender, receiver, nonce) {
+async function sendHugeCalldata(sender, receiver) {
     try {
         // Generate random calldata in 100KB to 127KB (Limit: 128KB)
         const size = Math.floor(Math.random() * (127 - 100 + 1) + 100) * 1024;
         const hugeData = '0x' + '00'.repeat(size);
-        const feeData = await getFeeData();
+        const feeData = await getFeeDataWithRetry(sender.provider);
         const tx = await sender.sendTransaction({
             to: receiver.address,
             data: hugeData,
-            nonce: nonce,
             maxFeePerGas: feeData.maxFeePerGas,
             maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
         });
@@ -96,19 +85,16 @@ async function sendHugeCalldata(sender, receiver, nonce) {
             transaction: {
                 from: sender?.address,
                 to: receiver?.address,
-                nonce: nonce,
             }
         });
         throw error;
     }
 }
 
-async function deployContract(sender, abi, bytecode, nonce) {
+async function deployContract(sender, abi, bytecode) {
     try {
         const factory = new ethers.ContractFactory(abi, bytecode, sender);
-        const contract = await factory.deploy({
-            nonce: nonce
-        });
+        const contract = await factory.deploy();
         return contract.deploymentTransaction();
     } catch (error) {
         logger.error('Contract deployment failed', {
@@ -116,7 +102,6 @@ async function deployContract(sender, abi, bytecode, nonce) {
             code: error.code,
             transaction: {
                 from: sender?.address,
-                nonce: nonce
             }
         });
         throw error;
@@ -128,7 +113,7 @@ async function ensureSufficientBalance(sender, provider, mainAccount, threshold 
     if (balance < threshold) {
         try {
             await acquireAccountLock(mainAccount.address);
-            const feeData = await getFeeData();
+            const feeData = await getFeeDataWithRetry(sender.provider);
             const tx = {
                 to: sender.address,
                 value: threshold - balance,
@@ -151,14 +136,14 @@ async function ensureSufficientBalance(sender, provider, mainAccount, threshold 
     }
 }
 
-async function executeRandomTransaction(sender, allAccounts, tokenContract, config, simpleStorageJson) {
+async function executeRandomTransaction(sender, allAccounts, tokenContract, config, simpleStorageJson, behavior) {
     const {
         complexityLevel = 50,
         ethTransferAmount = '0.000000001',
         skipWait = false,
     } = config;
 
-    let receiver, behavior, nonce;  
+    let receiver;  
     
     try {
         // 1. Lock sender while the tx's sending
@@ -176,25 +161,24 @@ async function executeRandomTransaction(sender, allAccounts, tokenContract, conf
             receiver = allAccounts[randomIndex];
         } while (receiver.address === sender.address);
 
-        behavior = selectBehavior(calculateWeights(complexityLevel));
-        nonce = await getNonceForAccount(sender, sender.provider);
         
         let result;
         switch (behavior) {
             case 0:
-                result = await transferNativeToken(sender, receiver, ethTransferAmount, nonce);
+                receiver = sender; // enhance stability
+                result = await transferNativeToken(sender, receiver, ethTransferAmount);
                 break;
             case 1:
                 const decimals = await tokenContract.decimals();
                 const amount = ethers.parseUnits("1", decimals);
-                result = await transferERC20Token(sender, receiver, tokenContract, amount, nonce);
+                result = await transferERC20Token(sender, receiver, tokenContract, amount);
                 break;
             case 2:
                 // Randomly choose between contract deployment and huge calldata
                 if (Math.random() < 0.5) {
-                    result = await deployContract(sender, simpleStorageJson.abi, simpleStorageJson.bytecode, nonce);
+                    result = await deployContract(sender, simpleStorageJson.abi, simpleStorageJson.bytecode);
                 } else {
-                    result = await sendHugeCalldata(sender, receiver, nonce);
+                    result = await sendHugeCalldata(sender, receiver);
                 }
                 break;
             default:
