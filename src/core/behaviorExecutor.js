@@ -1,6 +1,12 @@
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger.js';
 import { getFeeDataWithRetry } from '../utils/rpcUtils.js';
+import {
+    transferNativeToken,
+    transferERC20Token,
+    deployContract,
+    sendHugeCalldata
+} from './actions/index.js';
 
 
 const accountLocks = new Map();
@@ -14,98 +20,6 @@ async function acquireAccountLock(address) {
 
 async function releaseAccountLock(address) {
     accountLocks.delete(address);
-}
-
-async function transferNativeToken(sender, receiver, amount) {
-    try {
-        const feeData = await getFeeDataWithRetry(sender.provider);
-        const tx = {
-            to: receiver.address,
-            value: ethers.parseEther(amount),
-            gasLimit: 21000,
-            maxFeePerGas: feeData.maxFeePerGas,
-            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-        };
-        return await sender.sendTransaction(tx);
-    } catch (error) {
-        logger.error('Native token transfer failed', {
-            error: error.message,
-            code: error.code,
-            transaction: {
-                from: sender?.address,
-                to: receiver?.address,
-                amount: amount
-            }
-        });
-        throw error;
-    }
-}
-
-async function transferERC20Token(sender, receiver, tokenContract, amount) {
-    try {
-        const balance = await tokenContract.balanceOf(sender.address);
-        if(balance < amount) {
-            const faucetTx = await tokenContract.connect(sender).faucet(sender.address);
-            await faucetTx.wait(1);
-        }
-        
-        return await tokenContract.connect(sender).transfer(receiver.address, amount);
-
-    } catch (error) {
-        logger.error('ERC20 token transfer failed', {
-            error: error.message,
-            code: error.code,
-            transaction: {
-                from: sender?.address,
-                to: receiver?.address,
-                amount: amount.toString()
-            }
-        });
-        throw error;
-    }
-}
-
-async function sendHugeCalldata(sender, receiver) {
-    try {
-        // Generate random calldata in 100KB to 127KB (Limit: 128KB)
-        const size = Math.floor(Math.random() * (127 - 100 + 1) + 100) * 1024;
-        const hugeData = '0x' + '00'.repeat(size);
-        const feeData = await getFeeDataWithRetry(sender.provider);
-        const tx = await sender.sendTransaction({
-            to: receiver.address,
-            data: hugeData,
-            maxFeePerGas: feeData.maxFeePerGas,
-            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-        });
-        return tx;
-    } catch (error) {
-        logger.error('Huge calldata transaction failed', {
-            error: error.message,
-            code: error.code,
-            transaction: {
-                from: sender?.address,
-                to: receiver?.address,
-            }
-        });
-        throw error;
-    }
-}
-
-async function deployContract(sender, abi, bytecode) {
-    try {
-        const factory = new ethers.ContractFactory(abi, bytecode, sender);
-        const contract = await factory.deploy();
-        return contract.deploymentTransaction();
-    } catch (error) {
-        logger.error('Contract deployment failed', {
-            error: error.message,
-            code: error.code,
-            transaction: {
-                from: sender?.address,
-            }
-        });
-        throw error;
-    }
 }
 
 async function ensureSufficientBalance(sender, provider, mainAccount, threshold = ethers.parseEther('0.01')) {
@@ -174,7 +88,6 @@ async function executeRandomTransaction(sender, allAccounts, tokenContract, conf
                 result = await transferERC20Token(sender, receiver, tokenContract, amount);
                 break;
             case 2:
-                // Randomly choose between contract deployment and huge calldata
                 if (Math.random() < 0.5) {
                     result = await deployContract(sender, simpleStorageJson.abi, simpleStorageJson.bytecode);
                 } else {

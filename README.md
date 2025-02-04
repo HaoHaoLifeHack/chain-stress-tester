@@ -35,23 +35,28 @@ npm install
 ```
 
 ## Initialize
-1. **Create Test Accounts:**
+1. **Compile contracts:**
+```Shell
+npx hardhat compile
+```
+
+2. **Create Test Accounts:**
 ```Shell
 node src/scripts/initAccounts.js
 ```
 This will create 100 test accounts.
 
-2. **Fund Main Account:**
+3. **Fund Main Account:**
 ```Shell
 node src/scripts/fundMainAccount.js
 ```
 
-3. **Fund test accounts:**
+4. **Fund test accounts:**
 ```Shell
 node src/scripts/fundTestAccounts.js
 ```
 
-4. **Configure Test Settings:**
+5. **Configure Test Settings:**
 Customize your test scenarios in `config/simulation.config.js`:
 
 #### Account Creation Settings
