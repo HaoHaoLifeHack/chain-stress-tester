@@ -4,8 +4,10 @@ import { loadAccounts } from '../utils/accountLoader.js';
 import { loadContractJson } from '../utils/contractLoader.js';
 import { CONFIG } from '../config/simulation.config.js';
 import { logger, simulationLogger } from '../utils/logger.js';
+import createRecentlyUsedAccounts from '../utils/recentlyUsedAccounts.js';
 
 let stopSimulation = false;
+const recentlyUsedAccounts = createRecentlyUsedAccounts(3); // Initialize RecentlyUsedAccounts with a 3-batch history limit
 
 async function runSimulation() {
     const provider = new ethers.JsonRpcProvider(process.env.DEVCHAIN_ENDPOINT_URL);
@@ -61,9 +63,9 @@ async function runSimulation() {
             timestamp: new Date().toISOString(),
             parameters: {
                 batchSize: CONFIG.SIMULATION.BATCH_SIZE,
+                batchInterval: CONFIG.SIMULATION.BATCH_INTERVAL,
                 complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
-                ethTransferAmount: CONFIG.SIMULATION.ETH_TRANSFER_AMOUNT,
-                skipWait: CONFIG.SIMULATION.SKIP_WAIT_CONFIRMATION,
+                accounts: accounts.length
             },
             metrics: {
                 firstTransactionTimestamp: firstTxTime ? `${(firstTxTime - startTime) / 1000}s` : 'N/A',
@@ -127,7 +129,7 @@ async function runSimulation() {
     }
 
     async function executeTransaction(sender, behavior) {
-        const TRANSACTION_TIMEOUT = 30000; // 30 seconds timeout
+        const TRANSACTION_TIMEOUT = 60000; // 60 seconds timeout
         
         try {
             const txPromise = executeRandomTransaction(
@@ -181,11 +183,20 @@ async function runSimulation() {
 
         while (result.length < batchSize && result.length < accounts.length) {
             const randomIndex = Math.floor(Math.random() * accounts.length);
-            if (!selected.has(randomIndex)) {
+            const account = accounts[randomIndex];
+
+            if (!selected.has(randomIndex) && !recentlyUsedAccounts.isRecentlyUsed(account.address)) {
                 selected.add(randomIndex);
-                result.push(accounts[randomIndex]);
+                result.push(account);
             }
         }
+
+        // Log reused senders
+        if (result.length < batchSize) {
+            logger.warn('Not enough unique senders available, reusing some senders.');
+        }
+
+        recentlyUsedAccounts.addBatch(result.map(account => account.address));
         return result;
     }
 
