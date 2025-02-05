@@ -4,10 +4,10 @@ import { loadAccounts } from '../utils/accountLoader.js';
 import { loadContractJson } from '../utils/contractLoader.js';
 import { CONFIG } from '../config/simulation.config.js';
 import { logger, simulationLogger } from '../utils/logger.js';
-import createRecentlyUsedAccounts from '../utils/recentlyUsedAccounts.js';
 
 let stopSimulation = false;
-const recentlyUsedAccounts = createRecentlyUsedAccounts(3); // Initialize RecentlyUsedAccounts with a 3-batch history limit
+let accountGroups = null; // Store the account groups for reuse
+let currentGroupIndex = 0; // Track the current group being used
 
 async function runSimulation() {
     const provider = new ethers.JsonRpcProvider(process.env.DEVCHAIN_ENDPOINT_URL);
@@ -129,7 +129,7 @@ async function runSimulation() {
     }
 
     async function executeTransaction(sender, behavior) {
-        const TRANSACTION_TIMEOUT = 60000; // 60 seconds timeout
+        const TRANSACTION_TIMEOUT = 120000; // 120 seconds timeout
         
         try {
             const txPromise = executeRandomTransaction(
@@ -178,26 +178,34 @@ async function runSimulation() {
     }
 
     function getRandomSenders(accounts, batchSize) {
-        const selected = new Set();
-        const result = [];
+        if (!accountGroups) {
+            const availableAccounts = accounts.slice(1); // Skip account[0]
+            const selectedAccounts = [];
+            const totalAccountCount = batchSize * 3;
 
-        while (result.length < batchSize && result.length < accounts.length) {
-            const randomIndex = Math.floor(Math.random() * accounts.length);
-            const account = accounts[randomIndex];
-
-            if (!selected.has(randomIndex) && !recentlyUsedAccounts.isRecentlyUsed(account.address)) {
-                selected.add(randomIndex);
-                result.push(account);
+            // Select totalAccountCount unique accounts
+            while (selectedAccounts.length < totalAccountCount && availableAccounts.length > 0) {
+                const randomIndex = Math.floor(Math.random() * availableAccounts.length);
+                const account = availableAccounts.splice(randomIndex, 1)[0];
+                selectedAccounts.push(account);
             }
+
+            if (selectedAccounts.length < totalAccountCount) {
+                logger.warn(`Not enough unique accounts available to select ${totalAccountCount}.`);
+            }
+
+            // Divide into three groups
+            accountGroups = [
+                selectedAccounts.slice(0, batchSize),
+                selectedAccounts.slice(batchSize, 2 * batchSize),
+                selectedAccounts.slice(2 * batchSize, 3 * batchSize)
+            ];
         }
 
-        // Log reused senders
-        if (result.length < batchSize) {
-            logger.warn('Not enough unique senders available, reusing some senders.');
-        }
-
-        recentlyUsedAccounts.addBatch(result.map(account => account.address));
-        return result;
+        // Use the current group and update the index for the next call
+        const currentGroup = accountGroups[currentGroupIndex];
+        currentGroupIndex = (currentGroupIndex + 1) % accountGroups.length;
+        return currentGroup;
     }
 
     function shuffleArray(array) {
