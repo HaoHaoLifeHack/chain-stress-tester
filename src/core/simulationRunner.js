@@ -10,7 +10,14 @@ let stopSimulation = false;
 let accountGroups = null; // Store the account groups for reuse
 let currentGroupIndex = 0; // Track the current group being used
 
+function resetSimulationState() {
+    stopSimulation = false;
+    accountGroups = null;
+    currentGroupIndex = 0;
+}
+
 async function runSimulation() {
+    resetSimulationState();  
     const provider = new ethers.JsonRpcProvider(process.env.DEVCHAIN_ENDPOINT_URL);
     let accounts;
 
@@ -33,6 +40,7 @@ async function runSimulation() {
 
     const BATCH_SIZE = CONFIG.SIMULATION.BATCH_SIZE;
     const BATCH_INTERVAL = CONFIG.SIMULATION.BATCH_INTERVAL;
+    const GROUP_SIZE = CONFIG.SIMULATION.GROUP_SIZE;
     
     console.log(`\n=== Starting Simulation ===`);
     console.log(`Batch Size: ${BATCH_SIZE}`);
@@ -106,7 +114,7 @@ async function runSimulation() {
         
         shuffleArray(transactionTypes);
 
-        const uniqueSenders = getRandomSenders(accounts, BATCH_SIZE);
+        const uniqueSenders = getRandomSenders(accounts, BATCH_SIZE, GROUP_SIZE);
 
         // Batch balance check for all senders
         try {
@@ -197,22 +205,40 @@ async function runSimulation() {
         }
     }
 
-    function getRandomSenders(accounts, batchSize) {
+    function getRandomSenders(accounts, batchSize, groupSize) {
         if (!accountGroups) {
             const availableAccounts = accounts.slice(1); // Skip account[0]
-            const selectedAccounts = [];
-            const groupSize = CONFIG.SIMULATION.GROUP_SIZE || 3; // default group size
             const totalAccountCount = batchSize * groupSize;
 
-            // Select totalAccountCount unique accounts
+            // Check if there are enough accounts
+            if (availableAccounts.length < totalAccountCount) {
+                const error = new Error(
+                    `Insufficient accounts for simulation. ` +
+                    `Required: ${totalAccountCount} accounts ` +
+                    `(${batchSize} accounts × ${groupSize} groups), ` +
+                    `Available: ${availableAccounts.length} accounts`
+                );
+                
+                logger.error('Simulation stopped', {
+                    error: error.message,
+                    required: totalAccountCount,
+                    available: availableAccounts.length,
+                    batchSize,
+                    groupSize
+                });
+                
+                // Stop simulation
+                stopSimulation = true;
+                throw error;
+            }
+
+            const selectedAccounts = [];
+            
+            // Select accounts
             while (selectedAccounts.length < totalAccountCount && availableAccounts.length > 0) {
                 const randomIndex = Math.floor(Math.random() * availableAccounts.length);
                 const account = availableAccounts.splice(randomIndex, 1)[0];
                 selectedAccounts.push(account);
-            }
-
-            if (selectedAccounts.length < totalAccountCount) {
-                logger.warn(`Not enough unique accounts available to select ${totalAccountCount}.`);
             }
 
             // Dynamic grouping
