@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { ethers } from 'ethers';
-import { loadAccounts } from '../utils/accountLoader.js';
+import { loadAccounts } from '../utils/accountHandler.js';
 
 async function fundTestAccounts() {
     try {

@@ -7,48 +7,7 @@ import {
     deployContract,
     sendHugeCalldata
 } from './actions/index.js';
-
-
-const accountLocks = new Map();
-
-async function acquireAccountLock(address) {
-    while (accountLocks.get(address)) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    accountLocks.set(address, true);
-}
-
-async function releaseAccountLock(address) {
-    accountLocks.delete(address);
-}
-
-async function ensureSufficientBalance(sender, provider, mainAccount, threshold = ethers.parseEther('0.01')) {
-    const balance = await provider.getBalance(sender.address);
-    if (balance < threshold) {
-        try {
-            await acquireAccountLock(mainAccount.address);
-            const feeData = await getFeeDataWithRetry(sender.provider);
-            const tx = {
-                to: sender.address,
-                value: threshold - balance,
-                gasLimit: 21000,
-                maxFeePerGas: feeData.maxFeePerGas,
-                maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-                };
-
-                const txResponse = await mainAccount.sendTransaction(tx);
-                await txResponse.wait();
-
-                logger.info('Balance topped up', {
-                    address: sender.address,
-                    amount: threshold - balance,
-                    txHash: txResponse.hash
-            });
-        } finally {
-            releaseAccountLock(mainAccount.address);
-        }
-    }
-}
+import { acquireAccountLock, releaseAccountLock } from '../utils/accountHandler.js';
 
 async function executeRandomTransaction(sender, allAccounts, tokenContract, config, simpleStorageJson, behavior) {
     const {
@@ -67,15 +26,12 @@ async function executeRandomTransaction(sender, allAccounts, tokenContract, conf
             throw new Error('No accounts available');
         }
 
-        await ensureSufficientBalance(sender, sender.provider, allAccounts[0]);
-
         // Select a receiver that is not the sender
         do {
             const randomIndex = Math.floor(Math.random() * allAccounts.length);
             receiver = allAccounts[randomIndex];
-        } while (receiver.address === sender.address);
+        } while (receiver.address === sender.address || receiver.address === allAccounts[0].address);
 
-        
         let result;
         switch (behavior) {
             case 0:
@@ -165,8 +121,5 @@ export {
     transferNativeToken,
     transferERC20Token,
     deployContract,
-    calculateWeights,
-    ensureSufficientBalance,
-    acquireAccountLock,
-    releaseAccountLock
+    calculateWeights
 }; 

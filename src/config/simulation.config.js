@@ -10,6 +10,7 @@ export const CONFIG = {
         BATCH_INTERVAL: 1000,    // ms
         SKIP_WAIT_CONFIRMATION: false, 
         LOG_INTERVAL: 2000, // ms
+        GROUP_SIZE: 3, // for rotation mechanism
     },
-    MockUSDCAddress: '0x43d2f72548db94734f12bEE3676B0f7eF9A68ffC'
+    MockUSDCAddress: '0x54215708FedF1B616E7b9db310f2F3F11Fc8Cf18'
 }; 

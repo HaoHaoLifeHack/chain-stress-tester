@@ -10,7 +10,7 @@ let simulationProcess = null;
 
 app.post('/simulation', (req, res) => {
     const { method, params = [] } = req.body;
-    const [batchSize, batchInterval, complexityLevel, accountCount] = params;
+    const [batchSize, batchInterval, complexityLevel, accountCount, groupSize] = params;
 
     if (method === 'start') {
         if (simulationRunning) {
@@ -22,7 +22,7 @@ app.post('/simulation', (req, res) => {
         if (batchInterval !== undefined) CONFIG.SIMULATION.BATCH_INTERVAL = batchInterval;
         if (complexityLevel !== undefined) CONFIG.SIMULATION.DEFAULT_COMPLEXITY = complexityLevel;
         if (accountCount !== undefined) CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT = accountCount;
-
+        if (groupSize !== undefined) CONFIG.SIMULATION.GROUP_SIZE = groupSize;
         simulationRunning = true;
         simulationProcess = runSimulation()
             .then(() => {

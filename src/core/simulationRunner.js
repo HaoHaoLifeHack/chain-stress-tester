@@ -1,9 +1,10 @@
 import { ethers } from 'ethers';
 import { executeRandomTransaction, calculateWeights} from './behaviorExecutor.js';
-import { loadAccounts } from '../utils/accountLoader.js';
+import { loadAccounts } from '../utils/accountHandler.js';
 import { loadContractJson } from '../utils/contractLoader.js';
 import { CONFIG } from '../config/simulation.config.js';
 import { logger, simulationLogger } from '../utils/logger.js';
+import { ensureSufficientBalance } from '../utils/accountHandler.js';
 
 let stopSimulation = false;
 let accountGroups = null; // Store the account groups for reuse
@@ -65,7 +66,8 @@ async function runSimulation() {
                 batchSize: CONFIG.SIMULATION.BATCH_SIZE,
                 batchInterval: CONFIG.SIMULATION.BATCH_INTERVAL,
                 complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
-                accounts: accounts.length
+                accounts: accounts.length,
+                groupSize: CONFIG.SIMULATION.GROUP_SIZE
             },
             metrics: {
                 firstTransactionTimestamp: firstTxTime ? `${(firstTxTime - startTime) / 1000}s` : 'N/A',
@@ -101,21 +103,39 @@ async function runSimulation() {
             ...Array(numERC20Transfers).fill(1),
             ...Array(numComplexTransactions).fill(2)
         ];
-
-        // Shuffle the transaction types
+        
         shuffleArray(transactionTypes);
 
-        // Get unique senders
         const uniqueSenders = getRandomSenders(accounts, BATCH_SIZE);
 
-        // Create all transactions as promises
+        // Batch balance check for all senders
+        try {
+            const threshold = ethers.parseEther('0.01');
+            await Promise.all(
+                uniqueSenders.map(sender => 
+                    ensureSufficientBalance(sender, provider, accounts[0], threshold)
+                )
+            );
+            
+            logger.info('Batch balance check completed', {
+                sendersCount: uniqueSenders.length,
+            });
+        } catch (error) {
+            logger.error('Batch balance check failed', {
+                error: error.message,
+                sendersCount: uniqueSenders.length
+            });
+            throw error;
+        }
+
+        // Create and execute all transactions
         const batchPromises = uniqueSenders.map((sender, i) => 
             executeTransaction(sender, transactionTypes[i])
         );
 
         // Execute all transactions simultaneously
         await Promise.all(batchPromises);
-
+        
         totalTx += BATCH_SIZE;
 
         const currentTime = Date.now();
@@ -181,7 +201,8 @@ async function runSimulation() {
         if (!accountGroups) {
             const availableAccounts = accounts.slice(1); // Skip account[0]
             const selectedAccounts = [];
-            const totalAccountCount = batchSize * 3;
+            const groupSize = CONFIG.SIMULATION.GROUP_SIZE || 3; // default group size
+            const totalAccountCount = batchSize * groupSize;
 
             // Select totalAccountCount unique accounts
             while (selectedAccounts.length < totalAccountCount && availableAccounts.length > 0) {
@@ -194,12 +215,11 @@ async function runSimulation() {
                 logger.warn(`Not enough unique accounts available to select ${totalAccountCount}.`);
             }
 
-            // Divide into three groups
-            accountGroups = [
-                selectedAccounts.slice(0, batchSize),
-                selectedAccounts.slice(batchSize, 2 * batchSize),
-                selectedAccounts.slice(2 * batchSize, 3 * batchSize)
-            ];
+            // Dynamic grouping
+            accountGroups = Array.from({ length: groupSize }, (_, index) => {
+                const start = index * batchSize;
+                return selectedAccounts.slice(start, start + batchSize);
+            });
         }
 
         // Use the current group and update the index for the next call
