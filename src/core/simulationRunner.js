@@ -3,7 +3,7 @@ import { executeRandomTransaction, calculateWeights} from './behaviorExecutor.js
 import { loadAccounts } from '../utils/accountHandler.js';
 import { loadContractJson } from '../utils/contractLoader.js';
 import { CONFIG } from '../config/simulation.config.js';
-import { logger, simulationLogger } from '../utils/logger.js';
+import { logger, simulationLogger, metricsLogger, batchMetricsLogger } from '../utils/logger.js';
 import { ensureSufficientBalance } from '../utils/accountHandler.js';
 
 let stopSimulation = false;
@@ -137,13 +137,42 @@ async function runSimulation() {
         }
 
         // Create and execute all transactions
-        const batchPromises = uniqueSenders.map((sender, i) => 
-            executeTransaction(sender, transactionTypes[i])
+        const txResults = await Promise.all(
+            uniqueSenders.map((sender, i) => 
+                executeTransaction(sender, transactionTypes[i])
+            )
         );
-
-        // Execute all transactions simultaneously
-        await Promise.all(batchPromises);
         
+        // Calculate batch statistics
+        const successfulTxs = txResults.filter(r => r && r.duration);
+        if (successfulTxs.length > 0) {
+            const durations = successfulTxs.map(r => r.duration);
+            const gasPrices = successfulTxs.map(r => r.gasPrice).filter(Boolean);
+            
+            // Record batch statistics
+            batchMetricsLogger.info('Batch metrics', {
+                batchId: Math.floor(totalTx / BATCH_SIZE),
+                timestamp: new Date().toISOString(),
+                txCount: {
+                    total: BATCH_SIZE,
+                    successful: successfulTxs.length
+                },
+                duration: {
+                    min: Math.min(...durations),
+                    max: Math.max(...durations),
+                    avg: durations.reduce((a, b) => a + b, 0) / durations.length
+                },
+                gasPrice: gasPrices.length ? {
+                    min: ethers.formatUnits(gasPrices.reduce((a, b) => a < b ? a : b), 'gwei'),
+                    max: ethers.formatUnits(gasPrices.reduce((a, b) => a > b ? a : b), 'gwei'),
+                    avg: ethers.formatUnits(
+                        gasPrices.reduce((a, b) => a + b, BigInt(0)) / BigInt(gasPrices.length), 
+                        'gwei'
+                    )
+                } : null
+            });
+        }
+
         totalTx += BATCH_SIZE;
 
         const currentTime = Date.now();
@@ -157,7 +186,8 @@ async function runSimulation() {
     }
 
     async function executeTransaction(sender, behavior) {
-        const TRANSACTION_TIMEOUT = 120000; // 120 seconds timeout
+        const startTime = Date.now();
+        const TRANSACTION_TIMEOUT = 600000;
         
         try {
             const txPromise = executeRandomTransaction(
@@ -191,8 +221,26 @@ async function runSimulation() {
                 });
             }
 
-            successTx++;
-            return result;
+            if (result) {
+                // Wait for the transaction receipt
+                const receipt = await result.wait();
+                const endTime = Date.now();
+                const duration = endTime - startTime;
+                const gasPrice = result.gasPrice || result.maxFeePerGas; // deal with different tx type
+
+                // Record single transaction metrics
+                metricsLogger.info('Transaction metrics', {
+                    gasPrice: gasPrice ? ethers.formatUnits(gasPrice, 'gwei') : null,
+                    duration: duration,
+                    txHash: result.hash,
+                    sender: sender.address,
+                    type: behavior,
+                    status: receipt.status === 1 ? 'success' : 'failed',
+                });
+
+                successTx++;
+                return { result, duration, gasPrice };
+            }
         } catch (error) {
             failedTx++;
             logger.error('Execute Random Behavior failed', { 

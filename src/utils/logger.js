@@ -69,3 +69,36 @@ export const simulationLogger = winston.createLogger({
         })
     ]
 });
+
+// New metricsLogger for recording transaction metrics
+export const metricsLogger = winston.createLogger({
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.printf(({ timestamp, ...meta }) => {
+            return JSON.stringify({
+                timestamp,
+                ...meta
+            });
+        })
+    ),
+    transports: [
+        new winston.transports.File({
+            filename: path.join(logsDir, 'metrics.log'),
+            options: { flags: 'a' }
+        })
+    ]
+});
+
+export const batchMetricsLogger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.json()
+    ),
+    transports: [
+        new winston.transports.File({
+            filename: path.join(logsDir, 'batch_metrics.log')
+        })
+    ]
+});
+
+
