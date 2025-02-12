@@ -9,7 +9,7 @@ if (!fs.existsSync(logsDir)) {
 }
 
 // Clear log files
-const logFiles = ['error.log', 'combined.log'];
+const logFiles = ['error.log', 'combined.log', 'metrics.log', 'batch_metrics.log'];
 logFiles.forEach(file => {
     const logPath = path.join(logsDir, file);
     if (fs.existsSync(logPath)) {

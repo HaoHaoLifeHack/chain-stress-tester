@@ -3,6 +3,7 @@ node_modules
 
 # Environment variables
 .env
+.env.prometheus-test
 
 # Sensitive data
 src/data/accounts.json

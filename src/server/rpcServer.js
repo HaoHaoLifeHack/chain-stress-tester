@@ -1,4 +1,5 @@
 import express from 'express';
+import { getMetrics } from '../metrics/collector.js';
 import { runSimulation, stopCurrentSimulation } from '../core/simulationRunner.js';
 import { CONFIG } from '../config/simulation.config.js';
 
@@ -8,7 +9,7 @@ app.use(express.json());
 let simulationRunning = false;
 let simulationProcess = null;
 
-app.post('/simulation', (req, res) => {
+const handleSimulation = async (req, res) => {
     const { method, params = [] } = req.body;
     const [batchSize, batchInterval, complexityLevel, accountCount, groupSize] = params;
 
@@ -17,12 +18,12 @@ app.post('/simulation', (req, res) => {
             return res.status(400).json({ message: 'Simulation is already running' });
         }
 
-        // Update configuration based on request
         if (batchSize !== undefined) CONFIG.SIMULATION.BATCH_SIZE = batchSize;
         if (batchInterval !== undefined) CONFIG.SIMULATION.BATCH_INTERVAL = batchInterval;
         if (complexityLevel !== undefined) CONFIG.SIMULATION.DEFAULT_COMPLEXITY = complexityLevel;
         if (accountCount !== undefined) CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT = accountCount;
         if (groupSize !== undefined) CONFIG.SIMULATION.GROUP_SIZE = groupSize;
+
         simulationRunning = true;
         simulationProcess = runSimulation()
             .then(() => {
@@ -41,17 +42,40 @@ app.post('/simulation', (req, res) => {
             return res.status(400).json({ message: 'No simulation is running' });
         }
 
-        // Stop the simulation
         stopCurrentSimulation();
         simulationRunning = false;
-
         return res.status(200).json({ message: 'Simulation stopped' });
     }
 
     return res.status(400).json({ message: 'Invalid method' });
+};
+
+const handleMetrics = async (req, res) => {
+    res.set('Content-Type', 'text/plain');
+    const metrics = await getMetrics();
+    res.send(metrics);
+};
+
+const setupRoutes = () => {
+    app.post('/simulation', handleSimulation);
+    app.get('/metrics', handleMetrics);
+};
+
+const startServer = (port = 3000) => {
+    setupRoutes();
+    
+    return new Promise((resolve) => {
+        app.listen(port, () => {
+            console.log(`Server running at http://localhost:${port}`);
+            console.log(`Metrics endpoint: http://localhost:${port}/metrics`);
+            resolve();
+        });
+    });
+};
+
+startServer().catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`RPC Server running on port ${PORT}`);
-}); 
+export { startServer }; 

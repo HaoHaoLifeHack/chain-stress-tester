@@ -5,6 +5,7 @@ import { loadContractJson } from '../utils/contractLoader.js';
 import { CONFIG } from '../config/simulation.config.js';
 import { logger, simulationLogger, metricsLogger, batchMetricsLogger } from '../utils/logger.js';
 import { ensureSufficientBalance } from '../utils/accountHandler.js';
+import { recordDuration, recordGasPrice } from '../metrics/collector.js';
 
 let stopSimulation = false;
 let accountGroups = null; // Store the account groups for reuse
@@ -149,7 +150,24 @@ async function runSimulation() {
             const durations = successfulTxs.map(r => r.duration);
             const gasPrices = successfulTxs.map(r => r.gasPrice).filter(Boolean);
             
-            // Record batch statistics
+            recordDuration(Math.min(...durations), 'min');
+            recordDuration(Math.max(...durations), 'max');
+            recordDuration(
+                durations.reduce((a, b) => a + b, 0) / durations.length,
+                'avg'
+            );
+            
+            if (gasPrices.length > 0) {
+                const minGasPrice = gasPrices.reduce((a, b) => a < b ? a : b);
+                const maxGasPrice = gasPrices.reduce((a, b) => a > b ? a : b);
+                const avgGasPrice = gasPrices.reduce((a, b) => a + b, BigInt(0)) / 
+                                  BigInt(gasPrices.length);
+
+                recordGasPrice(minGasPrice, 'min');
+                recordGasPrice(maxGasPrice, 'max');
+                recordGasPrice(avgGasPrice, 'avg');
+            }
+
             batchMetricsLogger.info('Batch metrics', {
                 batchId: Math.floor(totalTx / BATCH_SIZE),
                 timestamp: new Date().toISOString(),
@@ -217,6 +235,7 @@ async function runSimulation() {
                 firstTxTime = Date.now();
                 logger.info('First successful transaction', {
                     sender: sender.address,
+                    txHash: result.hash,
                     initializationTime: `${(firstTxTime - startTime) / 1000}s`
                 });
             }
