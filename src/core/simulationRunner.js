@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { executeRandomTransaction, calculateWeights} from './behaviorExecutor.js';
+import { executeRandomTransaction, calculateWeights } from './behaviorExecutor.js';
 import { loadAccounts } from '../utils/accountHandler.js';
 import { loadContractJson } from '../utils/contractLoader.js';
 import { CONFIG } from '../config/simulation.config.js';
@@ -18,7 +18,7 @@ function resetSimulationState() {
 }
 
 async function runSimulation() {
-    resetSimulationState();  
+    resetSimulationState();
     const provider = new ethers.JsonRpcProvider(process.env.DEVCHAIN_ENDPOINT_URL);
     let accounts;
 
@@ -32,7 +32,7 @@ async function runSimulation() {
 
     const mockUSDCJson = await loadContractJson('MockUSDC');
     const simpleStorageJson = await loadContractJson('SimpleStorage');
-    
+
     const tokenContract = new ethers.Contract(
         CONFIG.MockUSDCAddress,
         mockUSDCJson.abi,
@@ -42,7 +42,7 @@ async function runSimulation() {
     const BATCH_SIZE = CONFIG.SIMULATION.BATCH_SIZE;
     const BATCH_INTERVAL = CONFIG.SIMULATION.BATCH_INTERVAL;
     const GROUP_SIZE = CONFIG.SIMULATION.GROUP_SIZE;
-    
+
     console.log(`\n=== Starting Simulation ===`);
     console.log(`Batch Size: ${BATCH_SIZE}`);
     console.log(`Interval: ${BATCH_INTERVAL}ms\n`);
@@ -94,7 +94,7 @@ async function runSimulation() {
 
         simulationLogger.info('Simulation completed', simulationResults);
         stopSimulation = false; // Reset stop flag
-        return simulationResults;  
+        return simulationResults;
     }
 
     async function executeBatch() {
@@ -112,7 +112,7 @@ async function runSimulation() {
             ...Array(numERC20Transfers).fill(1),
             ...Array(numComplexTransactions).fill(2)
         ];
-        
+
         shuffleArray(transactionTypes);
 
         const uniqueSenders = getRandomSenders(accounts, BATCH_SIZE, GROUP_SIZE);
@@ -121,11 +121,11 @@ async function runSimulation() {
         try {
             const threshold = ethers.parseEther('0.01');
             await Promise.all(
-                uniqueSenders.map(sender => 
+                uniqueSenders.map(sender =>
                     ensureSufficientBalance(sender, provider, accounts[0], threshold)
                 )
             );
-            
+
             logger.info('Batch balance check completed', {
                 sendersCount: uniqueSenders.length,
             });
@@ -139,29 +139,29 @@ async function runSimulation() {
 
         // Create and execute all transactions
         const txResults = await Promise.all(
-            uniqueSenders.map((sender, i) => 
+            uniqueSenders.map((sender, i) =>
                 executeTransaction(sender, transactionTypes[i])
             )
         );
-        
+
         // Calculate batch statistics
         const successfulTxs = txResults.filter(r => r && r.duration);
         if (successfulTxs.length > 0) {
             const durations = successfulTxs.map(r => r.duration);
             const gasPrices = successfulTxs.map(r => r.gasPrice).filter(Boolean);
-            
+
             recordDuration(Math.min(...durations), 'min');
             recordDuration(Math.max(...durations), 'max');
             recordDuration(
                 durations.reduce((a, b) => a + b, 0) / durations.length,
                 'avg'
             );
-            
+
             if (gasPrices.length > 0) {
                 const minGasPrice = gasPrices.reduce((a, b) => a < b ? a : b);
                 const maxGasPrice = gasPrices.reduce((a, b) => a > b ? a : b);
-                const avgGasPrice = gasPrices.reduce((a, b) => a + b, BigInt(0)) / 
-                                  BigInt(gasPrices.length);
+                const avgGasPrice = gasPrices.reduce((a, b) => a + b, BigInt(0)) /
+                    BigInt(gasPrices.length);
 
                 recordGasPrice(minGasPrice, 'min');
                 recordGasPrice(maxGasPrice, 'max');
@@ -184,7 +184,7 @@ async function runSimulation() {
                     min: ethers.formatUnits(gasPrices.reduce((a, b) => a < b ? a : b), 'gwei'),
                     max: ethers.formatUnits(gasPrices.reduce((a, b) => a > b ? a : b), 'gwei'),
                     avg: ethers.formatUnits(
-                        gasPrices.reduce((a, b) => a + b, BigInt(0)) / BigInt(gasPrices.length), 
+                        gasPrices.reduce((a, b) => a + b, BigInt(0)) / BigInt(gasPrices.length),
                         'gwei'
                     )
                 } : null
@@ -205,8 +205,8 @@ async function runSimulation() {
 
     async function executeTransaction(sender, behavior) {
         const startTime = Date.now();
-        const TRANSACTION_TIMEOUT = 600000;
-        
+        const TRANSACTION_TIMEOUT = 300000;
+
         try {
             const txPromise = executeRandomTransaction(
                 sender,
@@ -230,7 +230,7 @@ async function runSimulation() {
 
             // Race between transaction and timeout
             const result = await Promise.race([txPromise, timeoutPromise]);
-            
+
             if (result && !firstTxTime) {
                 firstTxTime = Date.now();
                 logger.info('First successful transaction', {
@@ -262,7 +262,7 @@ async function runSimulation() {
             }
         } catch (error) {
             failedTx++;
-            logger.error('Execute Random Behavior failed', { 
+            logger.error('Execute Random Behavior failed', {
                 error: error.message,
                 sender: sender.address,
                 behavior,
@@ -285,7 +285,7 @@ async function runSimulation() {
                     `(${batchSize} accounts × ${groupSize} groups), ` +
                     `Available: ${availableAccounts.length} accounts`
                 );
-                
+
                 logger.error('Simulation stopped', {
                     error: error.message,
                     required: totalAccountCount,
@@ -293,14 +293,14 @@ async function runSimulation() {
                     batchSize,
                     groupSize
                 });
-                
+
                 // Stop simulation
                 stopSimulation = true;
                 throw error;
             }
 
             const selectedAccounts = [];
-            
+
             // Select accounts
             while (selectedAccounts.length < totalAccountCount && availableAccounts.length > 0) {
                 const randomIndex = Math.floor(Math.random() * availableAccounts.length);
