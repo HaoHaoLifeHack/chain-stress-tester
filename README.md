@@ -72,8 +72,9 @@ CREATE_ACCOUNT: {
 SIMULATION: {
     DEFAULT_COMPLEXITY: 50,     // 0-100: Higher values increase huge calldata probability
     ETH_TRANSFER_AMOUNT: '0.000001', // Amount of ETH per transfer
-    BATCH_SIZE: 10,           // Number of transactions per batch
-    BATCH_INTERVAL: 100,      // Interval between batches (ms)
+    CONCURRENT_TX: 100, // Number of transactions to execute concurrently
+    TX_INTERVAL: 5000, // Interval between transactions (ms)
+    TX_TIMEOUT: 30000, // Transaction timeout (ms)
     SKIP_WAIT_CONFIRMATION: false,  // Whether to skip waiting for transaction confirmation
     LOG_INTERVAL: 2000        // Interval between logging stats (ms)
 }

@@ -7,15 +7,14 @@ async function showMasterWalletInfo() {
     
     // Get the master wallet from the seed phrase
     const masterWallet = ethers.Wallet.fromPhrase(process.env.SEED_PHRASE, provider);
+    const childWallet = masterWallet.deriveChild(0);
     
     // Get the balance
-    const balance = await provider.getBalance(masterWallet.address);
-    
-    console.log('=== Master wallet info ===');
-    console.log(`Address: ${masterWallet.address}`);
-    console.log(`Balance: ${ethers.formatEther(balance)} ETH`);
-    
-    return masterWallet.address;
+    const childBalance = await provider.getBalance(childWallet);
+    console.log('=== Account 0 wallet info ===');
+    console.log(`Address: ${childWallet.address}`);
+    console.log(`Balance: ${ethers.formatEther(childBalance)} ETH`);
+    return childWallet.address;
 }
 
 showMasterWalletInfo().catch(console.error); 

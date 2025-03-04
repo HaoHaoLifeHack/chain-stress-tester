@@ -11,15 +11,15 @@ let simulationProcess = null;
 
 const handleSimulation = async (req, res) => {
     const { method, params = [] } = req.body;
-    const [batchSize, batchInterval, complexityLevel, accountCount, groupSize] = params;
+    const [concurrentTx, txInterval, complexityLevel, accountCount, groupSize] = params;
 
     if (method === 'start') {
         if (simulationRunning) {
             return res.status(400).json({ message: 'Simulation is already running' });
         }
 
-        if (batchSize !== undefined) CONFIG.SIMULATION.BATCH_SIZE = batchSize;
-        if (batchInterval !== undefined) CONFIG.SIMULATION.BATCH_INTERVAL = batchInterval;
+        if (concurrentTx !== undefined) CONFIG.SIMULATION.CONCURRENT_TX = concurrentTx;
+        if (txInterval !== undefined) CONFIG.SIMULATION.TX_INTERVAL = txInterval;
         if (complexityLevel !== undefined) CONFIG.SIMULATION.DEFAULT_COMPLEXITY = complexityLevel;
         if (accountCount !== undefined) CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT = accountCount;
         if (groupSize !== undefined) CONFIG.SIMULATION.GROUP_SIZE = groupSize;
@@ -43,8 +43,11 @@ const handleSimulation = async (req, res) => {
         }
 
         stopCurrentSimulation();
-        simulationRunning = false;
-        return res.status(200).json({ message: 'Simulation stopped' });
+        setTimeout(() => {
+            simulationRunning = false;
+        }, 10000);
+        
+        return res.status(200).json({ message: 'Simulation stopping...' });
     }
 
     return res.status(400).json({ message: 'Invalid method' });

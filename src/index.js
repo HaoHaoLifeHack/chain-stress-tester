@@ -7,7 +7,9 @@ async function main() {
     try {
         logger.info('Starting chain stress test', {
             config: {
-                batchSize: CONFIG.SIMULATION.BATCH_SIZE,
+                CONCURRENT_TX: CONFIG.SIMULATION.CONCURRENT_TX,
+                TX_INTERVAL: CONFIG.SIMULATION.TX_INTERVAL,
+                TX_TIMEOUT: CONFIG.SIMULATION.TX_TIMEOUT,
                 complexity: CONFIG.SIMULATION.DEFAULT_COMPLEXITY
             }
         });

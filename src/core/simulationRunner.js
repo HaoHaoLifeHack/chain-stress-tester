@@ -11,10 +11,18 @@ let stopSimulation = false;
 let accountGroups = null; // Store the account groups for reuse
 let currentGroupIndex = 0; // Track the current group being used
 
+// Manage concurrent transactions
+let activeTransactions = 0;
+const pendingTransactions = [];
+let transactionTypes = []; // Transaction types generated based on complexity
+
 function resetSimulationState() {
     stopSimulation = false;
     accountGroups = null;
     currentGroupIndex = 0;
+    activeTransactions = 0;
+    pendingTransactions.length = 0;
+    transactionTypes = [];
 }
 
 async function runSimulation() {
@@ -39,13 +47,13 @@ async function runSimulation() {
         provider
     );
 
-    const BATCH_SIZE = CONFIG.SIMULATION.BATCH_SIZE;
-    const BATCH_INTERVAL = CONFIG.SIMULATION.BATCH_INTERVAL;
+    const CONCURRENT_TX = CONFIG.SIMULATION.CONCURRENT_TX;
+    const TX_INTERVAL = CONFIG.SIMULATION.TX_INTERVAL;
     const GROUP_SIZE = CONFIG.SIMULATION.GROUP_SIZE;
 
     console.log(`\n=== Starting Simulation ===`);
-    console.log(`Batch Size: ${BATCH_SIZE}`);
-    console.log(`Interval: ${BATCH_INTERVAL}ms\n`);
+    console.log(`Concurrent Transactions: ${CONCURRENT_TX}`);
+    console.log(`Transaction Interval: ${TX_INTERVAL}ms\n`);
 
     let totalTx = 0;
     let successTx = 0;
@@ -54,14 +62,63 @@ async function runSimulation() {
     let lastLogTime = Date.now();
     let firstTxTime = null;  // Record the time of the first successful transaction
 
-    async function runBatches() {
-        let i = 1;
-        while (!stopSimulation) {
-            console.log(`\n== runBatches: ${i} ==`);
-            await executeBatch();
-            await new Promise(resolve => setTimeout(resolve, CONFIG.SIMULATION.BATCH_INTERVAL));
-            i++;
+
+    initializeTransactionTypes();
+
+    async function runTransactions() {
+        console.log(`\n== Starting Transaction Execution ==`);
+        
+        const senders = getRandomSenders(accounts, CONCURRENT_TX, GROUP_SIZE);
+
+        // Pre-check balances
+        try {
+            const threshold = ethers.parseEther('0.01');
+            await Promise.all(
+                senders.map(sender =>
+                    ensureSufficientBalance(sender, provider, accounts[0], threshold)
+                )
+            );
+            logger.info('Initial balance check completed', {
+                sendersCount: senders.length,
+            });
+        } catch (error) {
+            logger.error('Initial balance check failed', {
+                error: error.message,
+                sendersCount: senders.length
+            });
+            throw error;
         }
+        
+        // Start executing initial transactions
+        for (let i = 0; i < senders.length && !stopSimulation; i++) {
+            const sender = senders[i];
+            const behavior = getNextTransactionType();
+            executeTransactionWithLimit(sender, behavior, accounts, tokenContract, simpleStorageJson);
+        }
+        
+        // Wait for all transactions to complete before ending the simulation
+        let simulationCompleted = false;
+        while (!simulationCompleted) {
+            if (stopSimulation) {
+                // When the stop request is issued, wait for all active transactions to complete
+                console.log(`\nWaiting for ${activeTransactions} active transactions to complete...`);
+                
+                // Wait for all active transactions to complete
+                while (activeTransactions > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    console.log(`Remaining active transactions: ${activeTransactions}`);
+                }
+                
+                simulationCompleted = true;
+            } else if (activeTransactions === 0 && pendingTransactions.length === 0) {
+                // All transactions have been completed eventually
+                simulationCompleted = true;
+            } else {
+                // Continue waiting for transactions to complete
+                await new Promise(resolve => setTimeout(resolve, CONFIG.SIMULATION.TX_INTERVAL));
+            }
+        }
+        
         return completeSimulation();
     }
 
@@ -72,8 +129,8 @@ async function runSimulation() {
         const simulationResults = {
             timestamp: new Date().toISOString(),
             parameters: {
-                batchSize: CONFIG.SIMULATION.BATCH_SIZE,
-                batchInterval: CONFIG.SIMULATION.BATCH_INTERVAL,
+                concurrentTx: CONFIG.SIMULATION.CONCURRENT_TX,
+                txInterval: CONFIG.SIMULATION.TX_INTERVAL,
                 complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
                 accounts: accounts.length,
                 groupSize: CONFIG.SIMULATION.GROUP_SIZE
@@ -83,7 +140,8 @@ async function runSimulation() {
                 totalTransactions: totalTx,
                 successfulTransactions: successTx,
                 failedTransactions: failedTx,
-                totalTimeSeconds: totalTime.toFixed(0)
+                totalTimeSeconds: totalTime.toFixed(0),
+                tps: (successTx / totalTime).toFixed(2)
             }
         };
 
@@ -93,119 +151,112 @@ async function runSimulation() {
         console.log(`Failed: ${failedTx}`);
 
         simulationLogger.info('Simulation completed', simulationResults);
-        stopSimulation = false; // Reset stop flag
         return simulationResults;
     }
 
-    async function executeBatch() {
+    function initializeTransactionTypes() {
         const weights = calculateWeights(CONFIG.SIMULATION.DEFAULT_COMPLEXITY);
         const totalWeight = weights.reduce((acc, weight) => acc + weight, 0);
 
-        // Calculate the number of transactions for each behavior type
-        const numNativeTransfers = Math.round((weights[0] / totalWeight) * BATCH_SIZE);
-        const numERC20Transfers = Math.round((weights[1] / totalWeight) * BATCH_SIZE);
-        const numComplexTransactions = BATCH_SIZE - numNativeTransfers - numERC20Transfers;
+        // Calculate the number of each transaction type based on weights
+        const numNativeTransfers = Math.round((weights[0] / totalWeight) * CONFIG.SIMULATION.CONCURRENT_TX);
+        const numERC20Transfers = Math.round((weights[1] / totalWeight) * CONFIG.SIMULATION.CONCURRENT_TX);
+        const numComplexTransactions = CONFIG.SIMULATION.CONCURRENT_TX - numNativeTransfers - numERC20Transfers;
 
-        // Create a list of transaction types
-        const transactionTypes = [
+        // Create transaction type list
+        transactionTypes = [
             ...Array(numNativeTransfers).fill(0),
             ...Array(numERC20Transfers).fill(1),
             ...Array(numComplexTransactions).fill(2)
         ];
 
         shuffleArray(transactionTypes);
+        
+        logger.info('Transaction types initialized', {
+            nativeTransfers: numNativeTransfers,
+            erc20Transfers: numERC20Transfers,
+            complexTransactions: numComplexTransactions,
+            complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY
+        });
+    }
 
-        const uniqueSenders = getRandomSenders(accounts, BATCH_SIZE, GROUP_SIZE);
+    function getNextTransactionType() {
+        if (transactionTypes.length === 0) {
+            initializeTransactionTypes();
+        }
+        return transactionTypes.shift();
+    }
 
-        // Batch balance check for all senders
+    // Async execute transaction (with concurrent limit)
+    async function executeTransactionWithLimit(sender, behavior, accounts, tokenContract, simpleStorageJson) {
+        if (stopSimulation) return;
+        
+        // Check if the current number of active transactions has reached the limit
+        if (activeTransactions >= CONFIG.SIMULATION.CONCURRENT_TX) {
+            // Add to the waiting queue
+            pendingTransactions.push({ sender, behavior });
+            logger.info('Transaction queued', {
+                sender: sender.address,
+                behavior,
+                queueLength: pendingTransactions.length,
+                activeTransactions
+            });
+            return;
+        }
+        
+        // Increase the count of currently executing transactions
+        activeTransactions++;
+        totalTx++;
+        
         try {
-            const threshold = ethers.parseEther('0.01');
-            await Promise.all(
-                uniqueSenders.map(sender =>
-                    ensureSufficientBalance(sender, provider, accounts[0], threshold)
-                )
-            );
-
-            logger.info('Batch balance check completed', {
-                sendersCount: uniqueSenders.length,
-            });
-        } catch (error) {
-            logger.error('Batch balance check failed', {
-                error: error.message,
-                sendersCount: uniqueSenders.length
-            });
-            throw error;
-        }
-
-        // Create and execute all transactions
-        const txResults = await Promise.all(
-            uniqueSenders.map((sender, i) =>
-                executeTransaction(sender, transactionTypes[i])
-            )
-        );
-
-        // Calculate batch statistics
-        const successfulTxs = txResults.filter(r => r && r.duration);
-        if (successfulTxs.length > 0) {
-            const durations = successfulTxs.map(r => r.duration);
-            const gasPrices = successfulTxs.map(r => r.gasPrice).filter(Boolean);
-
-            recordDuration(Math.min(...durations), 'min');
-            recordDuration(Math.max(...durations), 'max');
-            recordDuration(
-                durations.reduce((a, b) => a + b, 0) / durations.length,
-                'avg'
-            );
-
-            if (gasPrices.length > 0) {
-                const minGasPrice = gasPrices.reduce((a, b) => a < b ? a : b);
-                const maxGasPrice = gasPrices.reduce((a, b) => a > b ? a : b);
-                const avgGasPrice = gasPrices.reduce((a, b) => a + b, BigInt(0)) /
-                    BigInt(gasPrices.length);
-
-                recordGasPrice(minGasPrice, 'min');
-                recordGasPrice(maxGasPrice, 'max');
-                recordGasPrice(avgGasPrice, 'avg');
+            // Execute transaction
+            const result = await executeTransaction(sender, behavior, accounts, tokenContract, simpleStorageJson);
+            
+            // After the transaction is completed, wait for the specified time before executing the next transaction
+            if (!stopSimulation) {
+                setTimeout(() => {
+                    const nextBehavior = getNextTransactionType();
+                    executeTransactionWithLimit(sender, nextBehavior, accounts, tokenContract, simpleStorageJson);
+                }, CONFIG.SIMULATION.TX_INTERVAL);
             }
-
-            batchMetricsLogger.info('Batch metrics', {
-                batchId: Math.floor(totalTx / BATCH_SIZE),
-                timestamp: new Date().toISOString(),
-                txCount: {
-                    total: BATCH_SIZE,
-                    successful: successfulTxs.length
-                },
-                duration: {
-                    min: Math.min(...durations),
-                    max: Math.max(...durations),
-                    avg: durations.reduce((a, b) => a + b, 0) / durations.length
-                },
-                gasPrice: gasPrices.length ? {
-                    min: ethers.formatUnits(gasPrices.reduce((a, b) => a < b ? a : b), 'gwei'),
-                    max: ethers.formatUnits(gasPrices.reduce((a, b) => a > b ? a : b), 'gwei'),
-                    avg: ethers.formatUnits(
-                        gasPrices.reduce((a, b) => a + b, BigInt(0)) / BigInt(gasPrices.length),
-                        'gwei'
-                    )
-                } : null
+            
+            // Record transaction statistics
+            if (result && result.duration) {
+                recordTransactionMetrics(result);
+            }
+        } catch (error) {
+            logger.error('Transaction execution failed', {
+                error: error.message,
+                sender: sender.address,
+                behavior
             });
-        }
-
-        totalTx += BATCH_SIZE;
-
-        const currentTime = Date.now();
-        if (currentTime - lastLogTime >= CONFIG.SIMULATION.LOG_INTERVAL) {
-            console.log(`\n=== Simulation Stats ===`);
-            console.log(`Total Transactions: ${totalTx}`);
-            console.log(`Successful: ${successTx}`);
-            console.log(`Failed: ${failedTx}`);
-            lastLogTime = currentTime;
+        } finally {
+            // Decrease the count of currently executing transactions
+            activeTransactions--;
+            
+            // Check if there are any pending transactions to execute
+            if (pendingTransactions.length > 0 && !stopSimulation) {
+                const nextTx = pendingTransactions.shift();
+                executeTransactionWithLimit(nextTx.sender, nextTx.behavior, accounts, tokenContract, simpleStorageJson);
+            }
+            
+            // Output simulation statistics periodically
+            const currentTime = Date.now();
+            if (currentTime - lastLogTime >= CONFIG.SIMULATION.LOG_INTERVAL) {
+                console.log(`\n=== Simulation Stats ===`);
+                console.log(`Total Transactions: ${totalTx}`);
+                console.log(`Successful: ${successTx}`);
+                console.log(`Failed: ${failedTx}`);
+                console.log(`Active Transactions: ${activeTransactions}`);
+                console.log(`Pending Transactions: ${pendingTransactions.length}`);
+                lastLogTime = currentTime;
+            }
         }
     }
 
-    async function executeTransaction(sender, behavior) {
+    async function executeTransaction(sender, behavior, accounts, tokenContract, simpleStorageJson) {
         const startTime = Date.now();
-        const TRANSACTION_TIMEOUT = 300000;
+        const TRANSACTION_TIMEOUT = CONFIG.SIMULATION.TX_TIMEOUT;
 
         try {
             const txPromise = executeRandomTransaction(
@@ -213,7 +264,6 @@ async function runSimulation() {
                 accounts,
                 tokenContract,
                 {
-                    complexityLevel: CONFIG.SIMULATION.DEFAULT_COMPLEXITY,
                     ethTransferAmount: CONFIG.SIMULATION.ETH_TRANSFER_AMOUNT,
                     skipWait: CONFIG.SIMULATION.SKIP_WAIT_CONFIRMATION
                 },
@@ -272,17 +322,27 @@ async function runSimulation() {
         }
     }
 
-    function getRandomSenders(accounts, batchSize, groupSize) {
+    // Record transaction statistics
+    function recordTransactionMetrics(txResult) {
+        const { duration, gasPrice } = txResult;
+        
+        recordDuration(duration, 'current');
+        if (gasPrice) {
+            recordGasPrice(gasPrice, 'current');
+        }
+    }
+
+    function getRandomSenders(accounts, ccrTxSize, groupSize) {
         if (!accountGroups) {
             const availableAccounts = accounts.slice(1); // Skip account[0]
-            const totalAccountCount = batchSize * groupSize;
+            const totalAccountCount = ccrTxSize * groupSize;
 
             // Check if there are enough accounts
             if (availableAccounts.length < totalAccountCount) {
                 const error = new Error(
                     `Insufficient accounts for simulation. ` +
                     `Required: ${totalAccountCount} accounts ` +
-                    `(${batchSize} accounts × ${groupSize} groups), ` +
+                    `(${ccrTxSize} accounts × ${groupSize} groups), ` +
                     `Available: ${availableAccounts.length} accounts`
                 );
 
@@ -290,7 +350,7 @@ async function runSimulation() {
                     error: error.message,
                     required: totalAccountCount,
                     available: availableAccounts.length,
-                    batchSize,
+                    ccrTxSize,
                     groupSize
                 });
 
@@ -310,8 +370,8 @@ async function runSimulation() {
 
             // Dynamic grouping
             accountGroups = Array.from({ length: groupSize }, (_, index) => {
-                const start = index * batchSize;
-                return selectedAccounts.slice(start, start + batchSize);
+                const start = index * ccrTxSize;
+                return selectedAccounts.slice(start, start + ccrTxSize);
             });
         }
 
@@ -326,14 +386,16 @@ async function runSimulation() {
             const j = Math.floor(Math.random() * (i + 1));
             [array[i], array[j]] = [array[j], array[i]];
         }
+        return array;
     }
 
-    return runBatches();
+    return runTransactions();
 }
 
 function stopCurrentSimulation() {
     stopSimulation = true;
-    logger.info('Simulation stopped', { timestamp: new Date().toISOString() });
+    pendingTransactions.length = 0; // Clear the pending pool
+    console.log('\nStopping simulation...');
 }
 
 export { runSimulation, stopCurrentSimulation };

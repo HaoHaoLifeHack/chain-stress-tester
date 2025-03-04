@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger.js';
-import { getFeeDataWithRetry } from '../utils/rpcUtils.js';
 import {
     transferNativeToken,
     transferERC20Token,
@@ -11,7 +10,6 @@ import { acquireAccountLock, releaseAccountLock } from '../utils/accountHandler.
 
 async function executeRandomTransaction(sender, allAccounts, tokenContract, config, simpleStorageJson, behavior) {
     const {
-        complexityLevel = 50,
         ethTransferAmount = '0.000000001',
         skipWait = false,
     } = config;
@@ -72,20 +70,6 @@ async function executeRandomTransaction(sender, allAccounts, tokenContract, conf
     } finally {
         releaseAccountLock(sender.address);
     }
-}
-
-function selectBehavior(weights) {
-    const totalWeight = weights.reduce((acc, weight) => acc + weight, 0);
-    const random = Math.random() * totalWeight;
-    let cumulativeWeight = 0;
-
-    for (let i = 0; i < weights.length; i++) {
-        cumulativeWeight += weights[i];
-        if (random < cumulativeWeight) {
-            return i;
-        }
-    }
-    return 0;
 }
 
 function calculateWeights(complexityLevel) {
