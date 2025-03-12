@@ -53,4 +53,4 @@ Thumbs.db
 # Miscellaneous
 *.bak
 *.backup
-
+/src/ignore

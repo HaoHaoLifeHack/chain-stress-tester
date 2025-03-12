@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger.js';
-import { loadContractJson } from '../utils/contractLoader.js';
+import { loadContractJson } from '../core/resourceManager/contractLoader.js';
 
 async function deployMockUSDC() {
     try {

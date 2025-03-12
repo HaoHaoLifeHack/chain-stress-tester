@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { logger } from './logger.js';
-import { getFeeDataWithRetry } from './rpcUtils.js';
+import { getFeeDataWithRetry } from './rpcHandler.js';
 import { CONFIG } from '../config/simulation.config.js';
 import 'dotenv/config';
 

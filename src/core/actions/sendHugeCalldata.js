@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger.js';
-import { getFeeDataWithRetry } from '../../utils/rpcUtils.js';
+import { getFeeDataWithRetry } from '../../utils/rpcHandler.js';
 
 export async function sendHugeCalldata(sender, receiver) {
     try {
@@ -11,7 +11,7 @@ export async function sendHugeCalldata(sender, receiver) {
             to: receiver.address,
             data: hugeData,
             maxFeePerGas: feeData.maxFeePerGas,
-            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
+            //maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
         });
         return tx;
     } catch (error) {

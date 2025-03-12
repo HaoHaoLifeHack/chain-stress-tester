@@ -1,8 +1,7 @@
 import express from 'express';
-import { getMetrics } from '../metrics/collector.js';
+import { getMetrics } from '../core/monitoringSystem/metricsCollector.js';
 import { runSimulation, stopCurrentSimulation } from '../core/simulationRunner.js';
-import { CONFIG } from '../config/simulation.config.js';
-
+import { initializeConfig, updateSimulationConfigInRuntime, getCurrentConfig } from '../config/configManager.js';
 const app = express();
 app.use(express.json());
 
@@ -11,19 +10,13 @@ let simulationProcess = null;
 
 const handleSimulation = async (req, res) => {
     const { method, params = [] } = req.body;
-    const [concurrentTx, txInterval, complexityLevel, accountCount, groupSize] = params;
 
     if (method === 'start') {
         if (simulationRunning) {
             return res.status(400).json({ message: 'Simulation is already running' });
         }
 
-        if (concurrentTx !== undefined) CONFIG.SIMULATION.CONCURRENT_TX = concurrentTx;
-        if (txInterval !== undefined) CONFIG.SIMULATION.TX_INTERVAL = txInterval;
-        if (complexityLevel !== undefined) CONFIG.SIMULATION.DEFAULT_COMPLEXITY = complexityLevel;
-        if (accountCount !== undefined) CONFIG.CREATE_ACCOUNT.ACCOUNT_COUNT = accountCount;
-        if (groupSize !== undefined) CONFIG.SIMULATION.GROUP_SIZE = groupSize;
-
+        initializeConfig(params);
         simulationRunning = true;
         simulationProcess = runSimulation()
             .then(() => {
@@ -48,6 +41,21 @@ const handleSimulation = async (req, res) => {
         }, 10000);
         
         return res.status(200).json({ message: 'Simulation stopping...' });
+    }
+
+    if (method === 'updateParams') {
+        try {
+            updateSimulationConfigInRuntime(params);
+            return res.status(200).json({
+                message: 'Parameters will be updated in next transaction',
+                newConfig: getCurrentConfig()
+            });
+        } catch (error) {
+            return res.status(500).json({ 
+                message: 'Failed to update parameters',
+                error: error.message 
+            });
+        }
     }
 
     return res.status(400).json({ message: 'Invalid method' });

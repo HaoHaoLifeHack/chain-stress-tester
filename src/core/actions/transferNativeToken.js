@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { logger } from '../../utils/logger.js';
-import { getFeeDataWithRetry } from '../../utils/rpcUtils.js';
+import { getFeeDataWithRetry } from '../../utils/rpcHandler.js';
 
 export async function transferNativeToken(sender, receiver, amount) {
     try {
@@ -10,7 +10,7 @@ export async function transferNativeToken(sender, receiver, amount) {
             value: ethers.parseEther(amount),
             gasLimit: 21000,
             maxFeePerGas: feeData.maxFeePerGas,
-            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
+            //maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
         };
         return await sender.sendTransaction(tx);
     } catch (error) {
